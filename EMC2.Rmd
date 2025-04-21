@@ -1,0 +1,652 @@
+---
+title: "EMC2"
+author: "Austin"
+date: "11/30/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# libs and data
+```{r libs_data, include=FALSE}
+library(tidyverse)
+library(phyloseq)
+library(pheatmap)
+library(vegan)
+library(ggthemes)
+library(ggsignif)
+library(MASS)
+library(reshape2)
+library(ggtree)
+library(ape)
+library(phytools)
+library(Hmisc)
+library(PNWColors)
+library(picante)
+library(patchwork)
+library(ggvegan)
+
+EMC2_ps <- readRDS("C:/Users/hammera/Desktop/phd_work/microbes_and_PAHs/data/EMC2-merged-ps.RDS")
+
+EMC2_ps_rare <- phyloseq::rarefy_even_depth(EMC2_ps, rngseed = 801541)
+EMC2_ps_relabund <- phyloseq::transform_sample_counts(EMC2_ps, function(x) x / sum(x))
+
+preselected_metabolites <- c("X2.methylanthracene", "dibenzothiophene", "X2.methylphenanthrene", "X2.6.dimethylnaphthalene",
+                             "X2.methylnaphthalene", "X1.methylpyrene", "retene", "fluorene", "fluoranthene",
+                             "phenanthrene", "acenaphthylene", "benzo.e.pyrene", "triphenylene", "chrysene",
+                             "X2.ethylnaphthalene", "X1.methylnaphthalene", "naphthalene", 
+                             "X1.methylphenanthrene", "X1.2.dimethylnaphthalene", "X1.4.dimethylnaphthalene",
+                             "X1.5.dimethylnaphthalene", "anthracene", "benzo.k.fluoranthene", 
+                             "benzo.a.fluorene", "X2.3.dimethylanthracene", "benzo.b.fluorene", "benzo.b.fluoranthene",
+                             "dibenzo.a.e.fluoranthene")
+
+metabolites_not_included <- c("pyrene", "X1.6.and.1.3.dimethylnaphthalene", "benzo.a.anthracene")
+
+
+
+EMC2_sample_data <- data.frame(sample_data(EMC2_ps))
+EMC2_metadata_and_metabs <- data.frame(sample_data(EMC2_ps))
+
+all_PAHs <- EMC2_metadata_and_metabs %>%
+  dplyr::select(colnames(EMC2_metadata_and_metabs)[14:(ncol(EMC2_metadata_and_metabs)-7)])
+  
+
+variable_PAHs <- all_PAHs %>%
+  pivot_longer(everything(), names_to="PAH", values_to = "value") %>%
+  mutate(NAs = is.na(value)) %>%
+  group_by(PAH) %>%
+  filter(!any(NAs)) %>%
+  mutate(all_values_same = n_distinct(value)==1) %>%
+  filter(all_values_same==F) %>%
+  ungroup() %>%
+  dplyr::select(-c("all_values_same", "NAs", "value")) %>%
+  unique()
+
+metabolite_data <- all_PAHs %>%
+  dplyr::select(variable_PAHs$PAH)
+
+
+scaled_metabolite_data <- metabolite_data %>%
+  mutate_all(scale)
+
+
+upgraded_heatmap_rownames <- c("1-methylnaphthalene", "1-methylphenanthrene", "1-methylpyrene", "1,2-dimethylnaphthalene", "1,4-dimethylnaphthalene", "2-ethylnaphthalene", "2-methylanthracene", "2-methylnaphthalene",
+                               "2-methylnaphthalene", "2-methylphenanthrene", "2,3-dimethylanthracene", "2,6-dimethylnaphthalene", "3,6-dimethylphenanthrene", "acenaphthylene", "anthracene", "benz[a]anthracene",
+                               "benzo[a]fluorene", "benzo[b]fluoranthene", "benzo[b]fluorene", "benzo[e]pyrene", "benzo[k]fluoranthene", "chrysene", "dibenzo[a,e]fluoranthene", "dibenzothiophene", "fluoranthene",
+                               "fluorene", "naphthalene", "phenanthrene", "retene", "triphenylene")
+
+basic_scaled_heatmap <- pheatmap::pheatmap(
+  t(scaled_metabolite_data),
+  color = viridis::viridis(20),
+  main = "Scaled PAH Abundance",
+  show_colnames = FALSE,
+  labels_row = upgraded_heatmap_rownames
+)
+
+upgraded_heatmap <- basic_scaled_heatmap
+
+col_clusters <- hclust(dist(scale(scaled_metabolite_data)))
+col_order <- col_clusters$order
+final_heatmap_col_order <- colnames(scaled_metabolite_data)[col_order]
+row_clusters <- hclust(dist(scale(t(scaled_metabolite_data))))
+row_order <- row_clusters$order
+final_heatmap_row_order <- rownames(scaled_metabolite_data)[row_order]
+
+
+# Reorder the data
+reordered_data <- as.matrix(scaled_metabolite_data)[col_order, row_order]
+
+# Convert the reordered data to a tidy format
+tidy_data <- as.data.frame(reordered_data) %>%
+  rownames_to_column(var = "Sample") %>%
+  pivot_longer(!Sample, names_to = "Metabolite", values_to = "Abundance")
+
+```
+
+```{r alpha_diversity}
+pnw_contrast <- c(pnw_palette("Sunset")[1], pnw_palette("Sunset")[5])
+
+# Calculate alpha diversity for the rarefied phyloseq object
+rare_tree <- (phy_tree(EMC2_ps_rare))
+rare_phylo_dist <- picante::pd(t(otu_table(EMC2_ps_rare)), rare_tree, include.root=T)
+alpha_div_rare <- estimate_richness(EMC2_ps_rare, measures = c("Shannon", "Simpson", "Observed")) %>%
+  rownames_to_column(var="sample.name") %>%
+  left_join(rare_phylo_dist %>%
+              rownames_to_column(var="sample.name")) %>%
+  dplyr::select(-SR) %>%
+  left_join(data.frame(sample_data(EMC2_ps_rare)) %>%
+              dplyr::select(sample.name, Cohort)) %>%
+  pivot_longer(!c("sample.name", "Cohort"), names_to="Metric")
+
+rare_div_summary <- alpha_div_rare %>%
+  dplyr::group_by(Metric, Cohort) %>% 
+  dplyr::summarize(mean_value = mean(value),
+                   se = sd(value) / sqrt(n()))
+
+
+adiv_plot <- alpha_div_rare %>%
+  left_join(rare_div_summary, by=c("Cohort", "Metric")) %>%
+  mutate(Metric = case_when(
+     Metric == "PD" ~ "Phylogenetic",
+     TRUE ~ Metric  # Keep original values for other cases
+   )) %>%
+  mutate(Psych = ifelse(Cohort=="HH", "High", "Low")) %>%
+  filter(!(Metric=="Simpson")) %>%
+  ggplot(aes(x=Psych, y=value, color=Psych)) +
+  geom_errorbar(aes(ymin = mean_value - se, ymax = mean_value + se), width = 0.4) +
+  geom_jitter(width = 0.2) +
+  facet_wrap(~Metric, scales="free_y") +
+  scale_color_manual(values=pnw_contrast) +
+  theme_bw() +
+  xlab(NULL) +
+  ylab("Diversity Metric") +
+  theme(legend.position = "none") +
+ theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14), # Increase x-axis text size
+        axis.text.y = element_text(size = 14), # Increase y-axis text size
+        strip.text = element_text(size = 16)   # Increase facet label text size
+    )
+
+
+
+```
+
+```{r procrustean_analysis, echo=FALSE}
+# standardize the metabolite data and perform pca
+pha_standard <- decostand(metabolite_data, method="standardize")
+pha_pca <- rda(pha_standard)
+
+# normalized, apply PCoA to the resulting otu_table
+set.seed(801541)
+EMC2_ps_glom <- phyloseq::tax_glom(EMC2_ps_rare, taxrank="Genus")
+asv_table <- data.frame(t(otu_table(EMC2_ps_rare)))
+EMC2_pcoa <- capscale(asv_table ~ 1, dist="bray")
+
+# procrustean test of pah PCA and a pcoa from EMC2 PCoA
+EMC2_protest <- protest(Y=pha_pca, X=EMC2_pcoa, scores="sites", permutations=10000,
+        symmetric=FALSE, choices=c(1,14))
+EMC2_protest$signif
+
+EMC2_procrustes <- procrustes(X=pha_pca, Y=EMC2_pcoa, scores="sites")
+
+procrust_plot <- plot(EMC2_procrustes, kind = 1, type = "text")
+
+joined_pca_dist <- (data.frame(procrust_plot$heads) %>%
+    rownames_to_column(var="ID")) %>%
+  left_join(data.frame(procrust_plot$points) %>%
+              rownames_to_column(var="ID")) %>%
+  dplyr::rename(PC1a = X1,
+                PC2a = X2)
+
+
+EMC2_procrus_errors <- plot(EMC2_procrustes, kind=2)
+
+EMC2_errors_df <- data.frame(EMC2_procrus_errors$sites) %>%
+  rownames_to_column(var="ID") %>%
+  dplyr::select(-V1) %>%
+  left_join(EMC2_sample_data %>%
+              dplyr::select(c("sample.name", "Cohort", "Cohort.sex", "Sex")) %>%
+              dplyr::rename(ID = sample.name))
+
+EMC2_errors_df_long <- EMC2_errors_df %>%
+  pivot_longer(
+    cols = c(Cohort, Cohort.sex, Sex),
+    names_to = "Covariate"
+  )
+
+
+```
+
+```{r mantel_tests}
+micro_bray_dist <- phyloseq::distance(EMC2_ps_rare, method = "bray")
+metabolite_dist <- dist(pha_standard) # Euclidean distance by default
+set.seed(801541)
+mantel_result <- mantel(micro_bray_dist, metabolite_dist, method="spearman", 
+                        permutations=5000, na.rm=TRUE)
+mantel_result$signif
+```
+
+```{r mantel_viz, include=FALSE}
+#### HEATMAP OF ORDINATION RESULTS ####
+# PCoA for microbiome data (using Bray-Curtis distance)
+micro_pcoa <- capscale(micro_bray_dist ~ 1)  
+# PCA for metabolite data
+metabolite_pca <- rda(pha_standard) 
+
+# Microbiome component axes
+micro_axes <- micro_pcoa$CA$u  
+
+# Metabolite component axes
+metabolite_axes <- metabolite_pca$CA$u
+
+#### mantel-correlation plot ####
+metab_matrix <- as.matrix(metabolite_dist)
+metab_dist_data <- metab_matrix[lower.tri(metab_matrix)]
+row_idx <- row(metab_matrix)[lower.tri(metab_matrix)]
+col_idx <- col(metab_matrix)[lower.tri(metab_matrix)]
+
+metab_dist_df <- data.frame(item1 = row_idx, item2 = col_idx, metab_dist = metab_dist_data)
+
+micro_matrix <- as.matrix(micro_bray_dist)
+micro_dist_data <- micro_matrix[lower.tri(micro_matrix)]
+row_idx <- row(micro_matrix)[lower.tri(micro_matrix)]
+col_idx <- col(micro_matrix)[lower.tri(micro_matrix)]
+
+micro_dist_df <- data.frame(item1 = row_idx, item2 = col_idx, micro_dist = micro_dist_data)
+
+combined_dist_dfs <- metab_dist_df %>%
+  left_join(micro_dist_df, by=c("item1", "item2"))
+
+combined_dist_dfs %>%
+  ggplot(aes(x=log(metab_dist), y=micro_dist)) +
+  geom_point() +
+  geom_smooth(method="lm", se=F) +
+  theme_bw() +
+  xlab("Log Euclidean PAH Distance") +
+  ylab("Bray-Curtis Microbiome Dissimilarity")
+
+cd_dfs <- combined_dist_dfs %>%
+  filter(!(item1==21)) %>%
+  filter(!(item2==21))
+
+summary(lm(metab_dist~micro_dist, data=cd_dfs))
+
+```
+
+```{r PAHs_and_cognition}
+PAH_cog <- PAHs %>%
+  rownames_to_column(var="sample.name") %>%
+  left_join(EMC2_meta %>%
+              dplyr::select(c("sample.name", "Cohort"))) %>%
+  dplyr::select(-sample.name)
+
+
+# Function to fit the negative binomial GLM and extract p-values
+glm_nb_and_pvalue <- function(formula, data) {
+  model <- glm.nb(formula, data)
+  summary_model <- summary(model)
+  pvalues <- summary_model$coefficients[-1, "Pr(>|z|)"]  # Exclude intercept
+  return(pvalues)
+}
+
+# Get the names of the columns to be used as predictors (excluding Cohort)
+predictor_columns <- names(PAH_cog)[names(PAH_cog) != "Cohort"]
+
+# Create formulas for each predictor column
+formulas <- lapply(predictor_columns, function(col) as.formula(paste(col, "~ Cohort")))
+
+# Fit GLMs, extract p-values, and store in a list
+pvalue_list <- lapply(formulas, glm_nb_and_pvalue, data = PAH_cog)
+
+# Name the list elements for clarity
+names(pvalue_list) <- predictor_columns
+
+# Convert the list to a data frame for easier manipulation
+pvalue_df <- data.frame(pvalue_list)
+
+# Transpose to have variables as rows and p-values as columns
+pvalue_df <- data.frame(t(pvalue_df))
+colnames(pvalue_df) <- c("pvalue")
+
+# Print the resulting p-values
+fdr_metab_cog <- pvalue_df %>%
+  mutate(fdr = p.adjust(pvalue, method="fdr")) %>%
+  rownames_to_column(var="PAH") %>%
+  filter(fdr < 0.1)
+
+# Get a list of the relevant PAHs
+selected_PAHs <- unique(fdr_metab_cog$PAH) 
+
+# Filter the original PAH_cog dataframe for the relevant PAHs and pivot to long format
+plot_data <- PAH_cog %>% 
+  dplyr::select(Cohort, all_of(selected_PAHs)) %>%
+  pivot_longer(cols = -Cohort, names_to = "PAH", values_to = "Abundance")
+
+# Create the violin plot
+ggplot(plot_data, aes(x = Cohort, y = Abundance, fill = Cohort)) +
+  geom_violin() +
+  geom_jitter(width = 0.2, alpha = 0.5) + # Add points to visualize individual values
+  facet_wrap(~PAH, scales = "free_y") +     # Create separate panels for each PAH
+  theme_minimal() +                         # A clean theme
+  labs(title = "Abundance of Significant PAHs by Cohort",
+       y = "Abundance") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+PAH_summary <- plot_data %>% 
+  group_by(PAH, Cohort) %>%
+  dplyr::summarize(mean_value = mean(Abundance),
+            se = sd(Abundance) / sqrt(n()))
+
+# Join the summary data back to the original data
+plot_data_with_summary <- plot_data %>% 
+  left_join(PAH_summary, by = c("PAH", "Cohort"))
+
+# Create the plot with error bars and points
+plot_data_with_summary %>% 
+  mutate(Cohort = ifelse(Cohort=="HH", "High\nImpulsivity", "Low\nImpulsivity")) %>%
+  ggplot(aes(x = Cohort, y = Abundance, color = Cohort)) +
+  geom_errorbar(aes(ymin = mean_value - se, ymax = mean_value + se), width = 0.4) +
+  geom_jitter(size=3, width = 0.2, alpha = 0.5) +
+  facet_wrap(~PAH, scales = "free_y") +
+  theme_bw() +
+  labs(y = "Abundance") +
+ theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14), # Increase x-axis text size
+        axis.text.y = element_text(size = 14), # Increase y-axis text size
+        strip.text = element_text(size = 16)   # Increase facet label text size
+    ) +
+  scale_color_manual(values = pnw_contrast) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_color_manual(values=pnw_contrast, name="Impulsivity Cohort") +
+  theme(legend.position = "none") +
+  xlab(label=NULL)
+```
+
+```{r core_taxa, include=FALSE}
+genus_table <- data.frame(t(data.frame(otu_table(EMC2_ps_glom))))
+
+prevalence_df <- genus_table %>% 
+  as.data.frame() %>% # Ensure data is in data.frame format
+  pivot_longer(everything()) %>%
+  mutate(nonzero = ifelse(value>0, 1, 0)) %>%
+  group_by(name) %>%
+  summarise(prevalence = sum(nonzero)/n())
+
+prevalence_df %>%
+  ggplot(aes(x=prevalence)) +
+  geom_histogram()
+```
+
+```{r correlation_network, include=FALSE}
+EMC2_glom_relabund <- phyloseq::transform_sample_counts(tax_glom(EMC2_ps, taxrank="Genus"), function(x) x / sum(x))
+
+genera_count_tab <- data.frame(otu_table(EMC2_glom_relabund)) %>%
+  t() %>%
+  data.frame()
+genera_count_table <- genera_count_tab[ , colSums(genera_count_tab > 0) > 3]
+
+variable_PAH_data <- metabolite_data %>%
+  pivot_longer(everything(), names_to="PAHs", values_to = "abund") %>%
+  group_by(PAHs) %>%
+  mutate(is_variable = abund > min(abund)) %>%
+  dplyr::summarise(proportion_variable = sum(is_variable) / n()) %>%
+  filter(proportion_variable>0.1)
+
+log_met_data <- metabolite_data %>%
+  as.tibble() %>%
+    select_if(~ n_distinct(.) > 2)
+
+metab_metadata <- EMC2_sample_data[c(1:7, 78)]
+combined_data <- data.frame(bind_cols(genera_count_table, log_met_data)) %>%
+  rownames_to_column(var="sample.name")
+correlation_results <- rcorr(as.matrix(combined_data %>%
+                                         dplyr::select(-sample.name)), type="pearson")
+
+# Extract correlations
+correlations <- correlation_results$r 
+
+# Extract p-values
+p_values <- data.frame(correlation_results$P) %>%
+  rownames_to_column("tax") %>%
+  pivot_longer(!tax, names_to = "PAHs") %>%
+  filter(PAHs %in% colnames(log_met_data)) %>%
+  filter(tax %in% colnames(genera_count_table)) %>%
+  left_join((data.frame(tax_table(EMC2_glom_relabund)) %>%
+                         rownames_to_column(var="tax")), by="tax") %>%
+  mutate(FDR = p.adjust(value, method="fdr"))
+
+fdr_filtered <- p_values %>%
+  filter(FDR<0.1)
+
+small_plot_list <- list()
+
+# Iterate through the first 30 rows of fdr_filtered
+for (i in 1:length(c(1,13,14,22,35,40))) {
+  # Extract tax and PAHs values
+  tax <- fdr_filtered$tax[c(1,13,14,22,35,40)[i]]
+  PAH <- fdr_filtered$PAHs[c(1,13,14,22,35,40)[i]]
+  genera_name <- fdr_filtered$Genus[c(1,13,14,22,35,40)[i]]
+  
+    # Check if PAH is "X2.6.dimethylnaphthalene" and adjust label accordingly
+  if (PAH == "X2.6.dimethylnaphthalene") {
+    PAH_label <- "2,6-Dimethylnaphthalene"
+  } else {
+    PAH_label <- PAH
+  }
+  
+  # Create scatterplot for current tax and PAH pair
+  plot <- ggplot(pah_micro_and_metadata, aes_string(x = tax, y = PAH)) +
+    geom_point(aes(color = Cohort)) +
+    geom_smooth(method = "lm", se = FALSE) +
+    scale_color_manual(values = pnw_contrast) +
+    theme_bw() +
+    ggtitle(paste(genera_name, " | ", PAH_label)) +  # Title with corrected PAH label
+    ylab(PAH_label)
+  
+  # Add the plot to the plot list
+  small_plot_list[[i]] <- plot
+}
+
+small_combined_list <- wrap_plots(plotlist = small_plot_list)
+```
+
+```{r alpha/beta_div}
+EMC2_meta <- data.frame(sample_data(EMC2_ps_rare))
+
+richness_estimates <- estimate_richness(EMC2_ps_rare) %>%
+  mutate(Cohort = EMC2_meta$Cohort)
+
+## alpha div
+# List of diversity metrics to test
+diversity_metrics <- c("Observed", "Shannon")
+
+# Apply the test to each metric and create a data frame
+for (i in 1:2){
+  print(summary(glm(richness_estimates[,i] ~ Cohort, data=richness_estimates)))
+}
+
+pnw_contrast <- c(pnw_palette("Sunset")[1], pnw_palette("Sunset")[5])
+
+## beta div results
+# Calculate Unweighted Unifrac distance
+set.seed(801541)
+micro_sample_data <- data.frame(sample_data(EMC2_ps))
+micro_dist <- phyloseq::distance(rarefy_even_depth(EMC2_ps), method = "uunifrac")
+micro_cohort_test <- (adonis2(micro_dist~Cohort, data=micro_sample_data))
+
+micro_rda <- rda(data.frame(t(otu_table(rarefy_even_depth(EMC2_ps))))~Cohort, data=micro_sample_data)
+micro_nmds <- metaMDS(micro_dist, trymax = 100)
+
+
+# Extract NMDS coordinates and cohort information
+micro_ord_data <- data.frame(
+  "NMDS1" = micro_nmds$points[,1],
+  "NMDS2" = micro_nmds$points[,2],
+  "Cohort" = ifelse(micro_sample_data$Cohort=="HH", "High", "Low")
+)
+
+nmds_scores <- data.frame((vegan::scores(micro_nmds))) %>%
+  rownames_to_column(var="sample.name") %>%
+  left_join(micro_sample_data %>%
+              dplyr::select(Cohort, sample.name)) %>%
+  mutate(Cohort = ifelse(Cohort=="HH", "High\nImpulsivity", "Low\nImpulsivity"))
+
+cent <- aggregate(cbind(NMDS1, NMDS2)~Cohort, data=nmds_scores, FUN = mean)
+
+nmds_scores_with_centroid <- merge(nmds_scores, setNames(cent, c("Cohort", 'oNMDS1', 'oNMDS2')), by = 'Cohort', sort=FALSE)
+
+plot_3b <- nmds_scores %>%
+  ggplot(aes(x = NMDS1, y = NMDS2, colour = Cohort)) +
+  geom_segment(data = nmds_scores_with_centroid,
+               mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # spiders
+  geom_point(data = cent, size = 7) +                         # centroids
+  geom_point(size=2.5) +
+  coord_fixed() +
+  scale_color_manual(values=pnw_contrast, name="Impulsivity Cohort") +
+  theme_bw()
+
+
+
+# Visualize NMDS ordination
+micro_ord_data %>%
+  ggplot(aes(x=NMDS1, y=NMDS2, color=Cohort)) +
+  geom_point() +
+  # Assuming pnw_contrast is a color palette you've defined
+  scale_color_manual(values=pnw_contrast) + 
+  theme_bw() +
+  # Add stat_ellipse if you want ellipses around groups
+  stat_ellipse(aes(group = Cohort), type = "norm") + 
+  labs(title = "NMDS Ordination of Microbiome Data",
+       x = "NMDS1", y = "NMDS2")
+
+# select only the metabolites that vary in more than 10% of individuals
+summary_met <- EMC2_metadata_and_metabs[72:76]
+big_met <- EMC2_metadata_and_metabs[14:72] %>%
+  dplyr::select(variable_PAH_data$PAHs)
+
+# Create an empty dataframe to store results
+results_df <- data.frame(metabolite = character(),
+                         adonis_pvalue = numeric())  
+
+for (i in 1:ncol(big_met)) {
+      met_abundance <- data.frame("met_abund" = big_met[, i])
+      met_adon <- (adonis2(micro_dist ~ met_abund, data=met_abundance, permutations=1000))
+      print(paste0("For metabolite ", colnames(big_met)[i], " the p-value is: ", as.character(met_adon$`Pr(>F)`[1])))
+      results_df <- rbind(results_df, data.frame(metabolite = colnames(big_met)[i],
+                                               adonis_pvalue = met_adon$`Pr(>F)`[1]))
+}
+
+# View the results
+print(results_df %>%
+        mutate(fdr = p.adjust(adonis_pvalue, method="fdr")))
+
+
+## PAH beta div
+pha_stand <- decostand((metabolite_data %>%
+                          dplyr::select(variable_PAH_data$PAHs)), method="standardize")
+meta_dist <- dist(pha_stand, method="euclidean")
+
+metab_metadata <- EMC2_sample_data[c(1:7, 78)]
+
+
+set.seed(801541)
+(adonis2(meta_dist ~ Cohort*Sex, data=metab_metadata, permutations=5000))
+
+metabolite_rda_model <- rda(pha_stand~Cohort*Sex, data = metab_metadata)
+anova(metabolite_rda_model)
+
+## beta dispersion on this result
+# Create a new variable 'group' by concatenating Cohort and Sex
+metab_metadata$group <- paste(metab_metadata$Cohort, metab_metadata$Sex, sep = "_")
+
+# Perform betadisper test
+betadisper_results <- betadisper(meta_dist, metab_metadata$group)
+
+# Perform ANOVA on betadisper results
+anova_results <- anova(betadisper_results)
+print(anova_results)
+## Visualize the results
+# Extract RDA results for plotting
+whole_rda_data <- fortify(metabolite_rda_model) 
+
+rda_data <- whole_rda_data%>%
+  mutate(sample.name = label) %>%
+  left_join(metab_metadata, by="sample.name") %>%
+  filter(!is.na(Cohort) & score=="sites")
+
+biplot_data <- whole_rda_data %>%
+  filter(score=="biplot") %>%
+  filter(label!="CohortLL:SexM")
+
+pnw_contrast <- c(pnw_palette("Sunset")[1], pnw_palette("Sunset")[5])
+# Create ggplot
+
+rda_plot <- rda_data %>%
+  mutate(Cohort = ifelse(Cohort=="HH", "High\nImpulsivity", "Low\nImpulsivity")) %>%
+  ggplot(aes(x = RDA1, y = RDA2, color=Cohort, shape=Sex)) +
+  geom_point(size = 5, alpha=0.9) +
+  labs(title = "RDA of PAH Composition by Cohort and Sex",
+       x = "RDA1", y = "RDA2") +
+  scale_color_manual(values=pnw_contrast, name="Impulsivity Cohort") +
+  theme_bw() +
+  geom_segment(data = biplot_data, inherit.aes=F,
+               aes(x = 0, y = 0, xend = RDA1, yend = RDA2), 
+               arrow = arrow(length = unit(0.2, "cm")),
+               color = "black") +
+  geom_text(data = biplot_data, inherit.aes = F, 
+            aes(x = RDA1, y = RDA2, label = label), 
+            color = "black", hjust = 0.5, vjust = 1)
+
+
+
+
+plot_data_with_summary %>% 
+  mutate(Cohort = ifelse(Cohort == "HH", "High\nImpulsivity", "Low\nImpulsivity"),
+         PAH = case_when(
+           PAH == "X1.methylnaphthalene" ~ "1-Methylnaphthalene",
+           PAH == "X2.ethylnaphthalene" ~ "2-Ethylnaphthalene",
+           PAH == "X2.methylphenanthrene" ~ "2-Methylphenanthrene",
+           TRUE ~ PAH  # Keep other PAH names unchanged
+         )) %>%
+  ggplot(aes(x = Cohort, y = Abundance, color = Cohort)) +
+  geom_errorbar(aes(ymin = mean_value - se, ymax = mean_value + se), width = 0.4) +
+  geom_jitter(size=3, width = 0.2, alpha = 0.5) +
+  facet_wrap(~PAH, scales = "free_y") +
+  theme_bw() +
+  labs(y = "Abundance") +
+ theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14), # Increase x-axis text size
+        axis.text.y = element_text(size = 14), # Increase y-axis text size
+        strip.text = element_text(size = 16)   # Increase facet label text size
+    ) +
+  scale_color_manual(values=pnw_contrast, name="Impulsivity Cohort") +
+  theme(legend.position = "none") +
+  xlab(label=NULL)
+```
+
+```{r PAH_overdispersion}
+library(AER)
+
+# Function to test overdispersion for a single column
+check_overdispersion <- function(column_data) {
+  # Fit Poisson model
+  model <- glm(column_data ~ 1, family = poisson)
+  
+  # Perform overdispersion test (dispersiontest is designed for this)
+  test_result <- dispersiontest(model) 
+  
+  return(list(
+    overdispersed = test_result$p.value < 0.05,  # Check significance at 5% level
+    dispersion_ratio = test_result$estimate  # Estimate of variance/mean
+  ))
+}
+
+# Apply the function to all relevant columns of my dataframe
+results <- apply(metabolite_data[, 2:ncol(metabolite_data)], 2, check_overdispersion)
+
+# Print the results
+for (col_name in names(results)) {
+  cat(col_name, ":\n")
+  cat("  Overdispersed:", results[[col_name]]$overdispersed, "\n")
+  cat("  Dispersion Ratio:", results[[col_name]]$dispersion_ratio, "\n\n")
+}
+
+trans_metab <- metabolite_data %>%
+  pivot_longer(everything(), names_to="Metabolite", values_to="Abundance")
+
+PAH_density_plot <- trans_metab %>%
+  ggplot(aes(x=Abundance)) +
+  geom_density(fill="slateblue", alpha=0.2) +
+  facet_wrap(~Metabolite, scales = "free") +
+  theme_bw()
+
+```
+
+
+
+
+
+
+
