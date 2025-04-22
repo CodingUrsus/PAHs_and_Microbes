@@ -22,7 +22,7 @@ We  observe that more impulsive subject display disproportionate PAH exposure le
 
 ## Gut Microbiome and Impulsivity
 
-The gut microbiome’s composition is strongly correlated with impulsivity, underscoring its role in cognitive traits. Visualization (NMDS) and statistical testing of the taxonomic composition of the gut microbiome reveals  stratification of microbial communities based on impulsivity cohorts, suggesting a fundamental ecological shift within the gut which is related to impulsivity.
+Visualization (NMDS) ordination results and statistical testing of the taxonomic composition of the gut microbiome reveals  stratification of microbial communities based on impulsivity cohorts, suggesting a fundamental ecological shift within the gut which is related to impulsivity.
 
 ![Impulsivity NMDS](results/impulsivity_NMDS.png)
 *Figure 4: NMDS ordination of microbial communities stratified by impulsivity cohorts.*
