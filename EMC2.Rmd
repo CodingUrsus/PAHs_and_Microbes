@@ -497,10 +497,6 @@ for (i in 1:ncol(big_met)) {
                                                adonis_pvalue = met_adon$`Pr(>F)`[1]))
 }
 
-# View the results
-print(results_df %>%
-        mutate(fdr = p.adjust(adonis_pvalue, method="fdr")))
-
 
 ## PAH beta div
 pha_stand <- decostand((metabolite_data %>%
@@ -540,8 +536,8 @@ biplot_data <- whole_rda_data %>%
   filter(label!="CohortLL:SexM")
 
 pnw_contrast <- c(pnw_palette("Sunset")[1], pnw_palette("Sunset")[5])
-# Create ggplot
 
+# Create ggplot
 rda_plot <- rda_data %>%
   mutate(Cohort = ifelse(Cohort=="HH", "High\nImpulsivity", "Low\nImpulsivity")) %>%
   ggplot(aes(x = RDA1, y = RDA2, color=Cohort, shape=Sex)) +
