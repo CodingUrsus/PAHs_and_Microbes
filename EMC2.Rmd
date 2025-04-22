@@ -140,13 +140,14 @@ adiv_plot <- alpha_div_rare %>%
   facet_wrap(~Metric, scales="free_y") +
   scale_color_manual(values=pnw_contrast) +
   theme_bw() +
-  xlab(NULL) +
-  ylab("Diversity Metric") +
+  xlab("Impulsivity Cohort") +
+  ylab(NULL) +
   theme(legend.position = "none") +
  theme(
         axis.text.x = element_text(angle = 45, hjust = 1, size = 14), # Increase x-axis text size
         axis.text.y = element_text(size = 14), # Increase y-axis text size
-        strip.text = element_text(size = 16)   # Increase facet label text size
+        strip.text = element_text(size = 16),   # Increase facet label text size
+        axis.title.x = element_text(size = 16, face = "bold")
     )
 
 
@@ -238,14 +239,6 @@ micro_dist_df <- data.frame(item1 = row_idx, item2 = col_idx, micro_dist = micro
 
 combined_dist_dfs <- metab_dist_df %>%
   left_join(micro_dist_df, by=c("item1", "item2"))
-
-combined_dist_dfs %>%
-  ggplot(aes(x=log(metab_dist), y=micro_dist)) +
-  geom_point() +
-  geom_smooth(method="lm", se=F) +
-  theme_bw() +
-  xlab("Log Euclidean PAH Distance") +
-  ylab("Bray-Curtis Microbiome Dissimilarity")
 
 cd_dfs <- combined_dist_dfs %>%
   filter(!(item1==21)) %>%
@@ -487,20 +480,6 @@ plot_3b <- nmds_scores %>%
   scale_color_manual(values=pnw_contrast, name="Impulsivity Cohort") +
   theme_bw()
 
-
-
-# Visualize NMDS ordination
-micro_ord_data %>%
-  ggplot(aes(x=NMDS1, y=NMDS2, color=Cohort)) +
-  geom_point() +
-  # Assuming pnw_contrast is a color palette you've defined
-  scale_color_manual(values=pnw_contrast) + 
-  theme_bw() +
-  # Add stat_ellipse if you want ellipses around groups
-  stat_ellipse(aes(group = Cohort), type = "norm") + 
-  labs(title = "NMDS Ordination of Microbiome Data",
-       x = "NMDS1", y = "NMDS2")
-
 # select only the metabolites that vary in more than 10% of individuals
 summary_met <- EMC2_metadata_and_metabs[72:76]
 big_met <- EMC2_metadata_and_metabs[14:72] %>%
@@ -582,7 +561,7 @@ rda_plot <- rda_data %>%
 
 
 
-plot_data_with_summary %>% 
+impulsivity_and_PAHs_plot <- plot_data_with_summary %>% 
   mutate(Cohort = ifelse(Cohort == "HH", "High\nImpulsivity", "Low\nImpulsivity"),
          PAH = case_when(
            PAH == "X1.methylnaphthalene" ~ "1-Methylnaphthalene",
