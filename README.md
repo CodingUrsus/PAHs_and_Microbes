@@ -18,11 +18,11 @@ Our analysis uncovers critical links between the gut microbiome, PAH exposure, a
 We  observe that more impulsive subject display disproportionate PAH exposure levels. This connection, illustrated through a comparison of PAH abundance by impulsivity, reveals patterns that differ by sex, with males showing higher PAH exposure levels than females.
 
 ![PAHs and impulsivity](results/PAHs_and_impulsivity.png)
-*Figure 3: PAH exposure levels compared to impulsivity metrics reveal disproportionate exposure among high-impulsivity individuals.*
+*Figure 3: Comparison of PAH abundance across subject reveals disproportionate exposure among high-impulsivity individuals.*
 
 ## Gut Microbiome and Impulsivity
 
-Visualization (NMDS) ordination results and statistical testing of the taxonomic composition of the gut microbiome reveals  stratification of microbial communities based on impulsivity cohorts, suggesting a fundamental ecological shift within the gut which is related to impulsivity.
+Statistical testing of the taxonomic composition of the gut microbiome reveals  stratification of microbial communities based on impulsivity cohorts, suggesting a fundamental ecological shift within the gut which is related to impulsivity.
 
 ![Impulsivity NMDS](results/impulsivity_NMDS.png)
 *Figure 4: NMDS ordination of microbial communities stratified by impulsivity cohorts.*
